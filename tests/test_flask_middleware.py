@@ -124,3 +124,133 @@ class TestCaptureExceptionErrors:
             with patch.object(mm._global_client, "submit_application_error", side_effect=Exception("submit fail")):
                 result = capture_exception_errors(response)
         assert result is response
+
+
+class TestInstrumentFlask:
+    def _make_app(self):
+        from flask import Flask, jsonify
+
+        app = Flask(__name__)
+
+        @app.route("/ok")
+        def ok():
+            return "ok", 200
+
+        @app.route("/fail")
+        def fail():
+            return jsonify({"error": "db down"}), 500
+
+        @app.route("/health")
+        def health():
+            return "ok", 200
+
+        @app.route("/health-fail")
+        def health_fail():
+            return jsonify({"error": "db"}), 500
+
+        @app.route("/boom")
+        def boom():
+            raise ValueError("boom")
+
+        return app
+
+    def _init_with_fake_tracer(self, cfg):
+        mm.init(cfg)
+        fake_tracer = MagicMock()
+        fake_span = MagicMock()
+        fake_tracer.start_span.return_value = fake_span
+        mm.get_global_client().otel_client.tracer = fake_tracer
+        return fake_tracer, fake_span
+
+    def test_2xx_creates_span_with_ok_status(self):
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        fake_tracer, fake_span = self._init_with_fake_tracer(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        resp = app.test_client().get("/ok")
+        assert resp.status_code == 200
+        fake_tracer.start_span.assert_called_once()
+        assert fake_tracer.start_span.call_args[0][0] == "GET /ok"
+        fake_span.set_attribute.assert_any_call("http.status_code", 200)
+        fake_span.set_attribute.assert_any_call("error", False)
+        fake_span.end.assert_called_once()
+
+    def test_5xx_marks_error_and_submits(self):
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        fake_tracer, fake_span = self._init_with_fake_tracer(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "submit_application_error") as submit:
+            resp = app.test_client().get("/fail")
+        assert resp.status_code == 500
+        fake_span.set_attribute.assert_any_call("http.status_code", 500)
+        fake_span.set_attribute.assert_any_call("error", True)
+        fake_span.end.assert_called_once()
+        # The 5xx submission of capture_exception_errors must still run
+        submit.assert_called_once()
+        assert submit.call_args.kwargs["message"] == "db down"
+
+    def test_never_sampled_route_2xx_no_span(self):
+        cfg = make_cfg()
+        cfg.sampling.traces.never_sample_routes = ["/health"]
+        fake_tracer, _ = self._init_with_fake_tracer(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        resp = app.test_client().get("/health")
+        assert resp.status_code == 200
+        fake_tracer.start_span.assert_not_called()
+
+    def test_never_sampled_route_5xx_creates_error_span(self):
+        cfg = make_cfg()
+        cfg.sampling.traces.never_sample_routes = ["/health-fail"]
+        cfg.sampling.traces.always_sample_errors = True
+        fake_tracer, fake_span = self._init_with_fake_tracer(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "submit_application_error"):
+            resp = app.test_client().get("/health-fail")
+        assert resp.status_code == 500
+        # No span at request start, one error span created at finish
+        fake_tracer.start_span.assert_called_once()
+        attrs = fake_tracer.start_span.call_args.kwargs["attributes"]
+        assert attrs["http.status_code"] == 500
+        assert attrs["error"] is True
+        fake_span.end.assert_called_once()
+
+    def test_unhandled_exception_recorded_on_span(self):
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        fake_tracer, fake_span = self._init_with_fake_tracer(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "submit_application_error"):
+            resp = app.test_client().get("/boom")
+        assert resp.status_code == 500
+        fake_span.record_exception.assert_called_once()
+        fake_span.end.assert_called_once()
+
+    def test_no_client_passthrough(self):
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch("middlemonitor.flask_middleware.get_global_client", return_value=None):
+            resp = app.test_client().get("/ok")
+        assert resp.status_code == 200

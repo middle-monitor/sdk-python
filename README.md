@@ -53,6 +53,20 @@ def risky_function():
     raise ValueError("This will be automatically reported")
 ```
 
+### Flask integration
+
+One line to enable automatic capture: one trace per request, error status on 4xx/5xx, and 5xx responses reported to the Errors view.
+
+```python
+from middlemonitor import init_simple
+from middlemonitor.flask_middleware import instrument_flask
+
+init_simple()
+instrument_flask(app)
+```
+
+To only report 5xx errors without tracing, use `app.after_request(capture_exception_errors)` instead (do not combine both).
+
 ### Environment variable setup
 
 ```python
