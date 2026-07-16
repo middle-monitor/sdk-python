@@ -2,6 +2,8 @@ import os
 from enum import Enum
 from typing import List, Optional
 
+from .errors import InvalidConfigValueError
+
 
 class LogLevel(str, Enum):
     DEBUG = "DEBUG"
@@ -134,7 +136,7 @@ def config_from_env() -> Config:
     if traces_pct:
         pct = float(traces_pct)
         if not -1 <= pct <= 1:
-            raise ValueError(f"MIDDLE_MONITOR_TRACES_SAMPLING must be between -1 and 1, got {pct}")
+            raise InvalidConfigValueError(f"MIDDLE_MONITOR_TRACES_SAMPLING must be between -1 and 1, got {pct}")
         cfg.sampling.traces.percentage = pct
 
     logs_levels_raw = os.getenv("MIDDLE_MONITOR_LOGS_LEVELS")
@@ -145,7 +147,7 @@ def config_from_env() -> Config:
             try:
                 levels.append(LogLevel(lvl))
             except ValueError:
-                raise ValueError(f"Invalid log level in MIDDLE_MONITOR_LOGS_LEVELS: {lvl!r}")
+                raise InvalidConfigValueError(f"Invalid log level in MIDDLE_MONITOR_LOGS_LEVELS: {lvl!r}")
         if levels:
             cfg.sampling.logs.levels = levels
 

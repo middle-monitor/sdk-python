@@ -14,3 +14,8 @@ class ConfigError(MiddleMonitorError):
 
     def __init__(self, detail: str = "endpoint and token required") -> None:
         super().__init__(detail)
+
+
+class InvalidConfigValueError(MiddleMonitorError, ValueError):
+    """Raised when an invalid configuration value is encountered."""
+
