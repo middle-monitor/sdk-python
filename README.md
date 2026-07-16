@@ -24,7 +24,7 @@ pip install -e .
 from middlemonitor import MiddleMonitorClient
 
 client = MiddleMonitorClient(
-    api_url="http://localhost:8080",
+    api_url="https://api.middlemonitor.io",
     service="my-service"
 )
 
@@ -65,6 +65,6 @@ client = get_client()
 ### Environment variables
 
 ```bash
-export MIDDLE_MONITOR_API_URL=http://monitor.example.com
+export MIDDLE_MONITOR_API_URL=https://api.middlemonitor.io
 export MIDDLE_MONITOR_SERVICE=my-service
 ```

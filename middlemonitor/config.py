@@ -76,7 +76,7 @@ class Config:
         sampling: Optional[SamplingConfig] = None,
         timeout: float = 5.0,
     ) -> None:
-        self.endpoint = (endpoint or "http://localhost:8080").rstrip("/")
+        self.endpoint = (endpoint or "https://api.middlemonitor.io").rstrip("/")
         self.insecure = insecure if insecure is not None else self.endpoint.startswith("http://")
         self.service = service
         self.token = token
@@ -88,7 +88,7 @@ class Config:
 def new_config(endpoint: str, service: str, token: Optional[str] = None) -> Config:
     """Create a Config with smart defaults (mirrors Go's NewConfig)."""
     if not endpoint:
-        endpoint = "http://localhost:8080"
+        endpoint = "https://api.middlemonitor.io"
     return Config(
         endpoint=endpoint,
         service=service,
@@ -102,7 +102,7 @@ def config_from_env() -> Config:
     endpoint = (
         os.getenv("MIDDLE_MONITOR_API_URL")
         or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-        or "http://localhost:8080"
+        or "https://api.middlemonitor.io"
     )
 
     service = (

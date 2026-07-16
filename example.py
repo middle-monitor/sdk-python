@@ -7,7 +7,7 @@ from middlemonitor.config import new_config
 def main():
     # Option 1: explicit client with a Config object
     cfg = new_config(
-        endpoint="http://localhost:8080",
+        endpoint="https://api.middlemonitor.io",
         service="example-service",
     )
     client = MiddleMonitorClient(cfg)

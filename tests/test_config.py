@@ -108,7 +108,7 @@ class TestConfig:
 
     def test_empty_endpoint_defaults(self):
         cfg = Config(endpoint="", service="s")
-        assert cfg.endpoint == "http://localhost:8080"
+        assert cfg.endpoint == "https://api.middlemonitor.io"
 
     def test_https_not_insecure(self):
         cfg = Config(endpoint="https://host:4318", service="s")
@@ -133,7 +133,7 @@ class TestNewConfig:
 
     def test_empty_endpoint_defaults(self):
         cfg = new_config("", "svc")
-        assert cfg.endpoint == "http://localhost:8080"
+        assert cfg.endpoint == "https://api.middlemonitor.io"
 
     def test_no_token(self):
         cfg = new_config("http://h", "s")
@@ -154,7 +154,7 @@ class TestConfigFromEnv:
         monkeypatch.delenv("MIDDLE_MONITOR_LOGS_LEVELS", raising=False)
         monkeypatch.delenv("MIDDLE_MONITOR_LOGS_MIN_HTTP_STATUS", raising=False)
         cfg = config_from_env()
-        assert cfg.endpoint == "http://localhost:8080"
+        assert cfg.endpoint == "https://api.middlemonitor.io"
         assert cfg.service == "unknown"
 
     def test_custom_endpoint(self, monkeypatch):
