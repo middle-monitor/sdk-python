@@ -1,3 +1,4 @@
+import os
 import sys
 import traceback
 import threading
@@ -167,8 +168,14 @@ def init_with_config(api_url: str, service: str, token: Optional[str] = None) ->
 
 
 def get_global_client() -> Optional[MiddleMonitorClient]:
-    """Return the global client, auto-initializing from env vars if needed."""
-    if _global_client is None:
+    """Return the global client, or None when the SDK is not configured.
+
+    Auto-initializes from env vars only when MIDDLE_MONITOR_TOKEN is set:
+    without a token there is nothing to authenticate an export, and booting
+    anyway would silently point the exporter at the default public endpoint
+    from an application that never opted in.
+    """
+    if _global_client is None and os.getenv("MIDDLE_MONITOR_TOKEN"):
         init()
     return _global_client
 

@@ -77,6 +77,7 @@ class Config:
         protocol: str = "http",
         sampling: Optional[SamplingConfig] = None,
         timeout: float = 5.0,
+        disable_http_error_reporting: bool = False,
     ) -> None:
         self.endpoint = (endpoint or "https://api.middlemonitor.io").rstrip("/")
         self.insecure = insecure if insecure is not None else self.endpoint.startswith("http://")
@@ -85,6 +86,10 @@ class Config:
         self.protocol = protocol
         self.sampling = sampling or default_sampling_config()
         self.timeout = timeout
+        # Set it when the application already reports its own errors, otherwise
+        # every 5xx is recorded twice: once with the real cause, once with
+        # whatever the response body carries.
+        self.disable_http_error_reporting = disable_http_error_reporting
 
 
 def new_config(endpoint: str, service: str, token: Optional[str] = None) -> Config:
@@ -131,6 +136,10 @@ def config_from_env() -> Config:
 
     cfg = new_config(endpoint, service, token)
     cfg.protocol = protocol
+
+    disable_http_errors = os.getenv("MIDDLE_MONITOR_DISABLE_HTTP_ERROR_REPORTING")
+    if disable_http_errors is not None:
+        cfg.disable_http_error_reporting = disable_http_errors.strip().lower() == "true"
 
     traces_pct = os.getenv("MIDDLE_MONITOR_TRACES_SAMPLING")
     if traces_pct:

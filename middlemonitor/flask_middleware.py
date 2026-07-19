@@ -35,6 +35,8 @@ def capture_exception_errors(response: Any) -> Any:
     client = get_global_client()
     if not client:
         return response
+    if client.config.disable_http_error_reporting:
+        return response
     body = response.get_data()
     message = get_message_from_exception_body(body, response.status_code)
     request_body = None

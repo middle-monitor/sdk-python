@@ -345,3 +345,18 @@ class TestGlobalConvenienceFunctions:
     def test_flush_logs_with_client(self):
         mm.init(make_cfg())
         mm.flush_logs()
+
+
+class TestAutoInitGate:
+    """An application that never opted in must not start exporting: without a
+    token there is nothing to authenticate with, so auto-init would silently
+    ship data to the default public endpoint on the first middleware call."""
+
+    def test_get_global_client_stays_none_without_token(self, monkeypatch):
+        monkeypatch.delenv("MIDDLE_MONITOR_TOKEN", raising=False)
+        assert mm.get_global_client() is None
+
+    def test_get_global_client_auto_inits_with_token(self, monkeypatch):
+        monkeypatch.setenv("MIDDLE_MONITOR_TOKEN", "tok")
+        monkeypatch.setenv("MIDDLE_MONITOR_API_URL", "http://localhost:19999")
+        assert mm.get_global_client() is not None
