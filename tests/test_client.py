@@ -381,3 +381,75 @@ class TestInitGlobalClient:
         cfg = make_config()
         init_global_client(cfg)
         assert get_global_client() is not None
+
+
+def _client_for_log_record() -> OTelClient:
+    c = OTelClient.__new__(OTelClient)
+    c.config = new_config("localhost:1", "svc", "tok")
+    return c
+
+
+def test_build_log_record_carries_active_span():
+    """A log must carry its span, otherwise the backend cannot join it to the
+    trace timeline and correlated incident debugging silently stops working."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    trace.set_tracer_provider(TracerProvider())
+    tracer = trace.get_tracer("test")
+
+    with tracer.start_as_current_span("op") as span:
+        record = _client_for_log_record()._build_log_record(LogLevel.ERROR, "boom", None)
+        span_context = span.get_span_context()
+
+    assert record.trace_id == span_context.trace_id
+    assert record.span_id == span_context.span_id
+
+
+def test_build_log_record_without_span_stays_unlinked():
+    """Outside a span the ids must stay unset: a zeroed trace id would be
+    indexed as a real trace that never matches anything."""
+    record = _client_for_log_record()._build_log_record(LogLevel.INFO, "no span", None)
+
+    assert not record.trace_id
+    assert not record.span_id
+
+
+def test_submit_application_error_carries_trace_id():
+    """An error that carries its trace id is what lets the Errors view jump to the
+    failing request; without it the backend indexes the error unlinked."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    trace.set_tracer_provider(TracerProvider())
+    client = _client_for_log_record()
+
+    sent = {}
+
+    def capture(req, timeout=None):
+        sent["payload"] = json.loads(req.data.decode("utf-8"))
+        raise OSError("stop before the network")
+
+    with patch("urllib.request.urlopen", side_effect=capture):
+        with trace.get_tracer("test").start_as_current_span("op") as span:
+            client.submit_application_error("err", "msg")
+            expected = format(span.get_span_context().trace_id, "032x")
+
+    assert sent["payload"]["trace_id"] == expected
+    assert set(sent["payload"]["trace_id"]) != {"0"}
+
+
+def test_submit_application_error_without_span_omits_trace_id():
+    """Outside a span the field must be absent: a zeroed id would be indexed as a
+    real trace that matches nothing."""
+    client = _client_for_log_record()
+    sent = {}
+
+    def capture(req, timeout=None):
+        sent["payload"] = json.loads(req.data.decode("utf-8"))
+        raise OSError("stop before the network")
+
+    with patch("urllib.request.urlopen", side_effect=capture):
+        client.submit_application_error("err", "msg")
+
+    assert "trace_id" not in sent["payload"]

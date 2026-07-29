@@ -114,11 +114,23 @@ class OTelClient:
         if attrs:
             record_attrs.update(attrs)
 
+        # Carry the active span so the backend can link the log to its trace.
+        # logger.emit() does not do this; only the stdlib logging bridge does.
+        span_context = trace.get_current_span().get_span_context()
+        correlation: Dict[str, Any] = {}
+        if span_context.is_valid:
+            correlation = {
+                "trace_id": span_context.trace_id,
+                "span_id": span_context.span_id,
+                "trace_flags": span_context.trace_flags,
+            }
+
         return LogRecord(
             severity_number=severity_map.get(level, SeverityNumber.INFO),
             severity_text=level.value,
             body=message,
             attributes=record_attrs,
+            **correlation,
         )
 
     def log(self, level: LogLevel, message: str, attrs: Optional[Dict[str, str]] = None) -> None:
@@ -229,6 +241,10 @@ class OTelClient:
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "service": self.config.service,
         }
+        # Carry the active trace so the error links to the request that produced it.
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            payload["trace_id"] = format(span_context.trace_id, "032x")
         if method:
             payload["http_method"] = method
         if url:
