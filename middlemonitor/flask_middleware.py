@@ -16,9 +16,49 @@ Error-only hook (5xx submission to the Errors API, no tracing):
 
 instrument_flask supersedes capture_exception_errors; use one or the other.
 """
+import time
 from typing import Any
 
 from . import get_global_client, get_message_from_exception_body
+from .config import LogLevel, should_sample_log
+
+
+def _http_status_to_level(status: int) -> LogLevel:
+    """Maps a response status onto the levels the log sampling rules are written in:
+    5xx is the service failing, 4xx is the caller at fault."""
+    if status >= 500:
+        return LogLevel.ERROR
+    if status >= 400:
+        return LogLevel.WARN
+    return LogLevel.INFO
+
+
+def _log_http_request(client: Any, method: str, route: str, status: int,
+                      duration_ms: int, has_error: bool, cause: str = "") -> None:
+    """Records one entry per instrumented request, so the Logs view carries
+    per-service request volume — the half of the correlation that host CPU/memory
+    metrics cannot provide on their own.
+
+    Gated by the log sampling rules, which is what keeps this from becoming an
+    access-log firehose: with the defaults only failed requests get through (4xx as
+    WARN, 5xx as ERROR), never the 2xx traffic."""
+    level = _http_status_to_level(status)
+    if not should_sample_log(client.config, route, level, status, has_error):
+        return
+    message = f"{method} {route} {status}"
+    # The cause is already extracted for the Errors view; carrying it here is what
+    # makes a 5xx line readable without opening the trace.
+    if cause and cause != f"HTTP {status}":
+        message = f"{message}: {cause}"
+    try:
+        client.log(level, message, {
+            "http.method": method,
+            "http.route": route,
+            "http.status_code": str(status),
+            "duration_ms": str(duration_ms),
+        })
+    except Exception:
+        pass
 
 
 def capture_exception_errors(response: Any) -> Any:
@@ -77,7 +117,8 @@ def instrument_flask(app: Any) -> Any:
     from .config import should_sample_trace
 
     @app.before_request
-    def _mm_start_span():
+    def _mm_start_request():
+        g._mm_start = time.monotonic()
         client = get_global_client()
         if client is None or client.otel_client.tracer is None:
             return
@@ -134,7 +175,19 @@ def instrument_flask(app: Any) -> Any:
             )
             error_span.set_status(Status(StatusCode.ERROR, f"HTTP {status}"))
             error_span.end()
-        return capture_exception_errors(response)
+
+        # Cause of a 5xx, resolved once for both the Errors view and the request
+        # log so the two never disagree on what failed.
+        cause = ""
+        if is_server_error:
+            cause = get_message_from_exception_body(response.get_data(), status)
+
+        response = capture_exception_errors(response)
+        start = getattr(g, "_mm_start", None)
+        duration_ms = int((time.monotonic() - start) * 1000) if start else 0
+        _log_http_request(client, request.method, request.path, status,
+                          duration_ms, has_error, cause)
+        return response
 
     @app.teardown_request
     def _mm_end_span(exc):

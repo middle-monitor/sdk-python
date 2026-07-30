@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="middle-monitor-sdk",
-    version="0.1.6",
+    version="0.1.7",
     description="Python SDK for Middle-Monitor error reporting with OpenTelemetry",
     author="Middle-Monitor",
     license="MIT",

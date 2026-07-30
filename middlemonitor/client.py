@@ -9,7 +9,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+from opentelemetry.sdk.resources import HOST_NAME, Resource, SERVICE_NAME
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.trace import Status, StatusCode
 
@@ -50,9 +50,13 @@ class OTelClient:
         if self.initialized:
             return
 
-        resource = Resource.create({
-            SERVICE_NAME: self.config.service,
-        })
+        # host.name is what lets the backend tie this service's traffic to the host
+        # metrics collected by the agent. Left out when unresolved, rather than sent
+        # empty: an empty term would match no host and silently break the join.
+        resource_attrs = {SERVICE_NAME: self.config.service}
+        if self.config.hostname:
+            resource_attrs[HOST_NAME] = self.config.hostname
+        resource = Resource.create(resource_attrs)
 
         endpoint = self.config.endpoint.rstrip("/")
         if endpoint.endswith("/v1/traces"):

@@ -1,4 +1,5 @@
 import os
+import socket
 from enum import Enum
 from typing import List, Optional
 
@@ -59,6 +60,20 @@ class SamplingConfig:
         self.logs = logs or LogsSamplingConfig()
 
 
+def default_hostname() -> str:
+    """Host label for exports: MIDDLE_MONITOR_HOSTNAME when the deployment sets it,
+    the OS hostname otherwise. Resolved in Config so init_with_config, which never
+    reads the environment, still labels its exports with the right host. Empty when
+    unresolvable, so the attribute is left out rather than sent blank."""
+    from_env = (os.getenv("MIDDLE_MONITOR_HOSTNAME") or "").strip()
+    if from_env:
+        return from_env
+    try:
+        return socket.gethostname() or ""
+    except OSError:
+        return ""
+
+
 def default_sampling_config() -> SamplingConfig:
     percentage = 0.10
     return SamplingConfig(
@@ -78,6 +93,7 @@ class Config:
         sampling: Optional[SamplingConfig] = None,
         timeout: float = 5.0,
         disable_http_error_reporting: bool = False,
+        hostname: Optional[str] = None,
     ) -> None:
         self.endpoint = (endpoint or "https://api.middlemonitor.io").rstrip("/")
         self.insecure = insecure if insecure is not None else self.endpoint.startswith("http://")
@@ -86,6 +102,12 @@ class Config:
         self.protocol = protocol
         self.sampling = sampling or default_sampling_config()
         self.timeout = timeout
+        # Host this service runs on, labelling every export so a CPU or memory
+        # anomaly on a host correlates with the traffic of the services running on
+        # it. Defaults to the OS hostname — inside a container that is the
+        # container ID, so set MIDDLE_MONITOR_HOSTNAME to the host as
+        # Middle-Monitor names it, otherwise nothing joins the two sides.
+        self.hostname = hostname if hostname is not None else default_hostname()
         # Set it when the application already reports its own errors, otherwise
         # every 5xx is recorded twice: once with the real cause, once with
         # whatever the response body carries.

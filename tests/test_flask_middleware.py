@@ -254,3 +254,111 @@ class TestInstrumentFlask:
         with patch("middlemonitor.flask_middleware.get_global_client", return_value=None):
             resp = app.test_client().get("/ok")
         assert resp.status_code == 200
+
+
+class TestRequestLogs:
+    """The middleware is the only place that knows a request happened. Without
+    these logs the Logs view stays empty for an app that never calls log()
+    itself, and the traffic side of a host CPU/memory correlation has nothing to
+    aggregate."""
+
+    def _make_app(self):
+        from flask import Flask, jsonify
+
+        app = Flask(__name__)
+
+        @app.route("/ok")
+        def ok():
+            return "ok", 200
+
+        @app.route("/fail")
+        def fail():
+            return jsonify({"error": "db down"}), 500
+
+        @app.route("/nope")
+        def nope():
+            return jsonify({"error": "too many"}), 429
+
+        @app.route("/health")
+        def health():
+            return "ok", 200
+
+        return app
+
+    def _init(self, cfg):
+        mm.init(cfg)
+        mm.get_global_client().otel_client.tracer = MagicMock()
+
+    def test_5xx_logs_route_status_and_cause(self):
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        self._init(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "log") as log, \
+                patch.object(mm._global_client, "submit_application_error"):
+            resp = app.test_client().get("/fail")
+
+        assert resp.status_code == 500
+        log.assert_called_once()
+        level, message, attrs = log.call_args[0]
+        assert level.value == "ERROR"
+        assert message == "GET /fail 500: db down"
+        assert attrs["http.route"] == "/fail"
+        assert attrs["http.status_code"] == "500"
+        assert "duration_ms" in attrs
+
+    def test_2xx_not_logged_by_default(self):
+        """Request volume is what traces count; logging every 2xx would drown the
+        failures the correlation looks for."""
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        self._init(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "log") as log:
+            resp = app.test_client().get("/ok")
+
+        assert resp.status_code == 200
+        log.assert_not_called()
+
+    def test_4xx_logged_as_warn(self):
+        """A 4xx is a failed request too — the signal behind an auth or quota
+        storm — but WARN, since the caller is at fault, not the service."""
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        self._init(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "log") as log:
+            resp = app.test_client().get("/nope")
+
+        assert resp.status_code == 429
+        log.assert_called_once()
+        assert log.call_args[0][0].value == "WARN"
+
+    def test_never_captured_route_not_logged(self):
+        """Health probes run every few seconds on every service; capturing them
+        would dominate the Logs view and shift the correlation baseline."""
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        self._init(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "log") as log:
+            resp = app.test_client().get("/health")
+
+        assert resp.status_code == 200
+        log.assert_not_called()

@@ -352,3 +352,19 @@ class TestShouldSampleLog:
     def test_min_status_zero_skips_status_check(self):
         cfg = self._cfg(min_http_status=0, levels=[LogLevel.ERROR], capture_on_trace_error=False)
         assert should_sample_log(cfg, "/api", LogLevel.DEBUG, 500, False) is False
+
+
+class TestHostname:
+    def test_env_wins_over_os_hostname(self, monkeypatch):
+        """A container's hostname is its container ID, which matches no host in
+        Middle-Monitor, so the explicit value must win: it is the only thing that
+        lets host metrics and this service's traffic be correlated."""
+        monkeypatch.setenv("MIDDLE_MONITOR_HOSTNAME", "  host4  ")
+        assert new_config("http://localhost:8080", "svc").hostname == "host4"
+
+    def test_falls_back_to_os_hostname(self, monkeypatch):
+        """init_with_config never reads the environment, so resolving the label in
+        Config is what keeps that entry point from exporting a container ID."""
+        import socket
+        monkeypatch.delenv("MIDDLE_MONITOR_HOSTNAME", raising=False)
+        assert new_config("http://localhost:8080", "svc").hostname == socket.gethostname()
