@@ -31,7 +31,22 @@ class TestCaptureExceptionErrors:
         resp = MagicMock()
         resp.status_code = status_code
         resp.get_data.return_value = body
+        resp.direct_passthrough = False
         return resp
+
+    def test_5xx_streaming_body_is_never_read(self):
+        # Reading a streaming response (SSE) raises and consumes the generator:
+        # the error is reported without its body rather than breaking the response.
+        mm.init(make_cfg())
+        response = self._make_response(500, b"unreachable")
+        response.direct_passthrough = True
+
+        from flask import Flask
+        app = Flask(__name__)
+        with app.test_request_context("/events"):
+            result = capture_exception_errors(response)
+        assert result is response
+        response.get_data.assert_not_called()
 
     def test_2xx_returns_unchanged(self):
         response = self._make_response(200)

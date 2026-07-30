@@ -33,6 +33,17 @@ def _http_status_to_level(status: int) -> LogLevel:
     return LogLevel.INFO
 
 
+def _response_body(response: Any) -> bytes:
+    """Reads the body only when it is buffered: get_data() on a streaming response
+    (SSE, file download) raises and would consume the generator."""
+    if getattr(response, "direct_passthrough", False):
+        return b""
+    try:
+        return response.get_data()
+    except RuntimeError:
+        return b""
+
+
 def _log_http_request(client: Any, method: str, route: str, status: int,
                       duration_ms: int, has_error: bool, cause: str = "") -> None:
     """Records one entry per instrumented request, so the Logs view carries
@@ -77,7 +88,7 @@ def capture_exception_errors(response: Any) -> Any:
         return response
     if client.config.disable_http_error_reporting:
         return response
-    body = response.get_data()
+    body = _response_body(response)
     message = get_message_from_exception_body(body, response.status_code)
     request_body = None
     if request.get_data():
@@ -180,7 +191,7 @@ def instrument_flask(app: Any) -> Any:
         # log so the two never disagree on what failed.
         cause = ""
         if is_server_error:
-            cause = get_message_from_exception_body(response.get_data(), status)
+            cause = get_message_from_exception_body(_response_body(response), status)
 
         response = capture_exception_errors(response)
         start = getattr(g, "_mm_start", None)
