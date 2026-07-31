@@ -15,6 +15,16 @@ class LogLevel(str, Enum):
     PANIC = "PANIC"
 
 
+class ClientIpMode(str, Enum):
+    """What the HTTP middlewares record as the caller's address."""
+
+    # Keeps the network the caller comes from and drops the host part: enough to
+    # recognise a scanner, not enough to single out a person.
+    ANONYMIZED = "anonymized"
+    FULL = "full"
+    OFF = "off"
+
+
 class TracesSamplingConfig:
     def __init__(
         self,
@@ -94,6 +104,7 @@ class Config:
         timeout: float = 5.0,
         disable_http_error_reporting: bool = False,
         hostname: Optional[str] = None,
+        client_ip: ClientIpMode = ClientIpMode.ANONYMIZED,
     ) -> None:
         self.endpoint = (endpoint or "https://api.middlemonitor.io").rstrip("/")
         self.insecure = insecure if insecure is not None else self.endpoint.startswith("http://")
@@ -112,6 +123,11 @@ class Config:
         # every 5xx is recorded twice: once with the real cause, once with
         # whatever the response body carries.
         self.disable_http_error_reporting = disable_http_error_reporting
+        # What the HTTP middlewares record as the caller's address on each request
+        # log. An IP address is personal data: the default keeps the network
+        # (203.0.113.0) and drops the host part, which still tells a scanner apart
+        # from real traffic. FULL needs a documented legal basis, OFF records nothing.
+        self.client_ip = client_ip
 
 
 def new_config(endpoint: str, service: str, token: Optional[str] = None) -> Config:
@@ -162,6 +178,15 @@ def config_from_env() -> Config:
     disable_http_errors = os.getenv("MIDDLE_MONITOR_DISABLE_HTTP_ERROR_REPORTING")
     if disable_http_errors is not None:
         cfg.disable_http_error_reporting = disable_http_errors.strip().lower() == "true"
+
+    client_ip = os.getenv("MIDDLE_MONITOR_CLIENT_IP")
+    if client_ip:
+        try:
+            cfg.client_ip = ClientIpMode(client_ip.strip().lower())
+        except ValueError:
+            raise InvalidConfigValueError(
+                f"MIDDLE_MONITOR_CLIENT_IP must be anonymized, full or off, got {client_ip!r}"
+            )
 
     traces_pct = os.getenv("MIDDLE_MONITOR_TRACES_SAMPLING")
     if traces_pct:

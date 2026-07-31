@@ -93,6 +93,21 @@ cfg.sampling.logs.always_capture_routes = ["/api/pay/*"]    # every hit on a rou
 init(cfg)
 ```
 
+### Caller address
+
+The request log also carries a `client.ip` attribute, which is what tells a wall of 404s on `/wp-login.php` apart from a real user hitting a broken page. It is read from `CF-Connecting-IP`, `True-Client-IP`, `X-Forwarded-For` or `X-Real-IP` before falling back to `request.remote_addr`, so a service behind Caddy, nginx or Cloudflare records the caller and not the proxy.
+
+An IP address is personal data, so the default keeps the network and drops the host part — `203.0.113.42` is stored as `203.0.113.0`, an IPv6 address is cut to its /48. That is enough to recognise a scan, not enough to single out a person.
+
+```python
+cfg = new_config(api_url, service, token)
+cfg.client_ip = ClientIpMode.FULL   # whole address: needs its own legal basis
+cfg.client_ip = ClientIpMode.OFF    # record nothing
+init(cfg)
+```
+
+Recording full addresses is a decision about your users' data: give it a legal basis and say so in your privacy policy. An address that does not parse is dropped rather than stored, so a forged header never lands in the attribute.
+
 ### Correlating with host metrics
 
 Every export is labelled with `host.name`, which is what lets Middle-Monitor line up a CPU or memory spike on a host with the traffic of the services running on it. Inside a container the OS hostname is the container ID and matches no host, so set the real one:
@@ -116,4 +131,6 @@ client = get_client()
 ```bash
 export MIDDLE_MONITOR_API_URL=https://api.middlemonitor.io
 export MIDDLE_MONITOR_SERVICE=my-service
+# Optional: caller address on request logs — anonymized (default), full or off
+export MIDDLE_MONITOR_CLIENT_IP=off
 ```

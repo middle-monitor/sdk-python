@@ -2,6 +2,7 @@ import os
 import pytest
 
 from middlemonitor.config import (
+    ClientIpMode,
     Config,
     LogLevel,
     LogsSamplingConfig,
@@ -14,6 +15,7 @@ from middlemonitor.config import (
     should_sample_log,
     should_sample_trace,
 )
+from middlemonitor.errors import InvalidConfigValueError
 
 
 class TestLogLevel:
@@ -156,6 +158,17 @@ class TestConfigFromEnv:
         cfg = config_from_env()
         assert cfg.endpoint == "https://api.middlemonitor.io"
         assert cfg.service == "unknown"
+
+    def test_client_ip_mode(self, monkeypatch):
+        monkeypatch.setenv("MIDDLE_MONITOR_CLIENT_IP", " FULL ")
+        assert config_from_env().client_ip == ClientIpMode.FULL
+
+    def test_client_ip_mode_rejects_unknown(self, monkeypatch):
+        """A typo must not silently downgrade to storing full addresses: the
+        deployment asked for a privacy level and has to know it did not get it."""
+        monkeypatch.setenv("MIDDLE_MONITOR_CLIENT_IP", "anonymised")
+        with pytest.raises(InvalidConfigValueError):
+            config_from_env()
 
     def test_custom_endpoint(self, monkeypatch):
         monkeypatch.setenv("MIDDLE_MONITOR_API_URL", "http://custom:9090")

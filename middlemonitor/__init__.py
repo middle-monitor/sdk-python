@@ -4,7 +4,7 @@ import traceback
 import threading
 from typing import Optional, Dict
 
-from .config import Config, LogLevel, new_config, config_from_env
+from .config import ClientIpMode, Config, LogLevel, new_config, config_from_env
 from .client import (
     OTelClient,
     init_global_client,

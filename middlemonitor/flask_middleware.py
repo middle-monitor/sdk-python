@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 from . import get_global_client, get_message_from_exception_body
+from .client_ip import resolve_client_ip
 from .config import LogLevel, should_sample_log
 
 
@@ -45,7 +46,8 @@ def _response_body(response: Any) -> bytes:
 
 
 def _log_http_request(client: Any, method: str, route: str, status: int,
-                      duration_ms: int, has_error: bool, cause: str = "") -> None:
+                      duration_ms: int, has_error: bool, cause: str = "",
+                      client_ip: str = "") -> None:
     """Records one entry per instrumented request, so the Logs view carries
     per-service request volume — the half of the correlation that host CPU/memory
     metrics cannot provide on their own.
@@ -61,13 +63,17 @@ def _log_http_request(client: Any, method: str, route: str, status: int,
     # makes a 5xx line readable without opening the trace.
     if cause and cause != f"HTTP {status}":
         message = f"{message}: {cause}"
+    attrs = {
+        "http.method": method,
+        "http.route": route,
+        "http.status_code": str(status),
+        "duration_ms": str(duration_ms),
+    }
+    # Absent unless config.client_ip allows it — see resolve_client_ip.
+    if client_ip:
+        attrs["client.ip"] = client_ip
     try:
-        client.log(level, message, {
-            "http.method": method,
-            "http.route": route,
-            "http.status_code": str(status),
-            "duration_ms": str(duration_ms),
-        })
+        client.log(level, message, attrs)
     except Exception:
         pass
 
@@ -197,7 +203,8 @@ def instrument_flask(app: Any) -> Any:
         start = getattr(g, "_mm_start", None)
         duration_ms = int((time.monotonic() - start) * 1000) if start else 0
         _log_http_request(client, request.method, request.path, status,
-                          duration_ms, has_error, cause)
+                          duration_ms, has_error, cause,
+                          resolve_client_ip(client.config, request.headers, request.remote_addr))
         return response
 
     @app.teardown_request

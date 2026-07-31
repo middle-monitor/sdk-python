@@ -5,7 +5,7 @@ import pytest
 
 import middlemonitor as mm
 import middlemonitor.client as client_module
-from middlemonitor.config import new_config
+from middlemonitor.config import ClientIpMode, new_config
 from middlemonitor.flask_middleware import capture_exception_errors
 
 
@@ -325,6 +325,39 @@ class TestRequestLogs:
         assert attrs["http.route"] == "/fail"
         assert attrs["http.status_code"] == "500"
         assert "duration_ms" in attrs
+
+    def test_log_carries_anonymized_client_ip(self):
+        """The address is what turns a wall of 404s into "one host is scanning
+        us", so it travels on the log line, next to the route that was probed."""
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        self._init(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "log") as log:
+            app.test_client().get("/nope", headers={"X-Forwarded-For": "203.0.113.42"})
+
+        assert log.call_args[0][2]["client.ip"] == "203.0.113.0"
+
+    def test_client_ip_absent_when_off(self):
+        """An empty value would still say a request came from somewhere we chose
+        not to record, so the attribute must be missing entirely."""
+        cfg = make_cfg()
+        cfg.sampling.traces.percentage = 1.0
+        cfg.client_ip = ClientIpMode.OFF
+        self._init(cfg)
+
+        app = self._make_app()
+        from middlemonitor.flask_middleware import instrument_flask
+        instrument_flask(app)
+
+        with patch.object(mm._global_client, "log") as log:
+            app.test_client().get("/nope", headers={"X-Forwarded-For": "203.0.113.42"})
+
+        assert "client.ip" not in log.call_args[0][2]
 
     def test_2xx_not_logged_by_default(self):
         """Request volume is what traces count; logging every 2xx would drown the
